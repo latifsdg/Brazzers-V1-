@@ -2,6 +2,7 @@ import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeys
 import { Boom } from '@hapi/boom'
 import fs from 'fs'
 import path from 'path'
+import qrcode from 'qrcode-terminal' // <== ajouté pour afficher le QR code
 
 // charger dynamiquement les commandes du dossier commands
 const commands = new Map()
@@ -14,12 +15,17 @@ fs.readdirSync(commandsDir).forEach(file => {
   }
 })
 
-async function startSock () {
+async function startSock() {
   const { state, saveCreds } = await useMultiFileAuthState('auth')
-  const sock = makeWASocket({ auth: state, printQRInTerminal: true })
+
+  const sock = makeWASocket({
+    auth: state,
+    printQRInTerminal: false // on gère le QR nous-même
+  })
 
   sock.ev.on('creds.update', saveCreds)
 
+  // Gestion des messages
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const m = messages[0]
     if (!m.message || !m.key.remoteJid) return
@@ -44,12 +50,19 @@ async function startSock () {
     }
   })
 
+  // Afficher le QR code + gérer la connexion
   sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update
+    const { connection, lastDisconnect, qr } = update
+
+    // Afficher le QR dans le terminal
+    if (qr) {
+      console.log('🔄 Nouveau QR reçu : scannez avec WhatsApp > Appareils connectés')
+      qrcode.generate(qr, { small: true })
+    }
+
     if (connection === 'close') {
       const shouldReconnect =
-        (lastDisconnect.error = Boom)?.output?.statusCode !==
-        DisconnectReason.loggedOut
+        (lastDisconnect.error = Boom)?.output?.statusCode !== DisconnectReason.loggedOut
       if (shouldReconnect) {
         startSock()
       }
